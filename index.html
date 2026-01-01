@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Clicker Game - Underwater Evolution</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: linear-gradient(135deg, #0c2461 0%, #1e3799 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        
+        #unity-container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 500;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 10;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 0 0 10px 10px;
+        }
+        
+        #unity-canvas {
+            width: 960px;
+            height: 600px;
+            max-width: 100vw;
+            max-height: 100vh;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 10px;
+            background: #000;
+        }
+        
+        .progress-bar {
+            width: 300px;
+            height: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            margin: 20px auto;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00b894, #00cec9);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+        
+        .fallback-message {
+            display: none;
+            background: rgba(231, 76, 60, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            max-width: 500px;
+            text-align: center;
+        }
+        
+        @media (max-width: 1000px) {
+            #unity-canvas {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 16/9;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="unity-container">
+        <div id="loading">
+            <div>Loading Underwater Clicker Evolution...</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div id="progress-text">0%</div>
+        </div>
+        
+        <div class="fallback-message" id="fallback-message">
+            <strong>Optimizing loading...</strong>
+            <p id="fallback-detail"></p>
+        </div>
+        
+        <canvas id="unity-canvas" width="960" height="600"></canvas>
+    </div>
+
+    <script>
+        // Элементы DOM
+        const loadingEl = document.getElementById('loading');
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+        const fallbackMsg = document.getElementById('fallback-message');
+        const fallbackDetail = document.getElementById('fallback-detail');
+        const canvas = document.getElementById('unity-canvas');
+        
+        // Определяем базовый путь
+        const buildPath = "Build";
+        
+        // Версии файлов для попыток загрузки (от самой быстрой к самой медленной)
+        const fileVersions = [
+            {
+                name: 'Brotli Compressed',
+                ext: '.br',
+                compression: 'br',
+                config: {
+                    dataUrl: `${buildPath}/webgl-build.data.br`,
+                    frameworkUrl: `${buildPath}/webgl-build.framework.js.br`,
+                    codeUrl: `${buildPath}/webgl-build.wasm.br`
+                }
+            },
+            {
+                name: 'Gzip Compressed', 
+                ext: '.gz',
+                compression: 'gzip',
+                config: {
+                    dataUrl: `${buildPath}/webgl-build.data.gz`,
+                    frameworkUrl: `${buildPath}/webgl-build.framework.js.gz`,
+                    codeUrl: `${buildPath}/webgl-build.wasm.gz`
+                }
+            },
+            {
+                name: 'Uncompressed',
+                ext: '',
+                compression: 'none',
+                config: {
+                    dataUrl: `${buildPath}/webgl-build.data`,
+                    frameworkUrl: `${buildPath}/webgl-build.framework.js`,
+                    codeUrl: `${buildPath}/webgl-build.wasm`
+                }
+            }
+        ];
+        
+        // Проверяем поддержку сжатия
+        function checkCompressionSupport() {
+            const supports = { br: false, gzip: false };
+            
+            try {
+                // Проверка Brotli
+                if ('CompressionStream' in window) {
+                    supports.br = true;
+                }
+            } catch(e) {}
+            
+            // Gzip поддерживают все современные браузеры
+            supports.gzip = true;
+            
+            return supports;
+        }
+        
+        // Выбираем лучшую версию для загрузки
+        function selectBestVersion() {
+            const support = checkCompressionSupport();
+            console.log('Compression support:', support);
+            
+            // Пробуем в порядке предпочтения
+            for (const version of fileVersions) {
+                if (version.compression === 'none' || support[version.compression]) {
+                    console.log(`Selected: ${version.name}`);
+                    return version;
+                }
+            }
+            
+            return fileVersions[2]; // fallback на несжатые
+        }
+        
+        // Загружаем игру
+        async function loadGame() {
+            const selectedVersion = selectBestVersion();
+            const baseConfig = {
+                streamingAssetsUrl: "StreamingAssets",
+                companyName: "DefaultCompany",
+                productName: "Clicker - Underwater Evolution",
+                productVersion: "1.0"
+            };
+            
+            const config = { ...baseConfig, ...selectedVersion.config };
+            
+            console.log('Loading with config:', config);
+            
+            // Показываем информацию о выбранном методе
+            if (selectedVersion.name !== 'Uncompressed') {
+                fallbackDetail.textContent = `Using ${selectedVersion.name} for faster loading`;
+                fallbackMsg.style.display = 'block';
+            }
+            
+            // Создаем промис для загрузки Unity
+            return new Promise((resolve, reject) => {
+                // Загружаем лоадер
+                const script = document.createElement('script');
+                script.src = `${buildPath}/webgl-build.loader.js`;
+                
+                script.onload = () => {
+                    // Обновляем прогресс
+                    const progressCallback = (progress) => {
+                        const percent = Math.round(progress * 100);
+                        progressFill.style.width = percent + '%';
+                        progressText.textContent = percent + '%';
+                    };
+                    
+                    // Запускаем Unity
+                    createUnityInstance(canvas, config, progressCallback)
+                        .then((instance) => {
+                            console.log('Unity loaded successfully!');
+                            loadingEl.style.opacity = '0';
+                            loadingEl.style.pointerEvents = 'none';
+                            fallbackMsg.style.display = 'none';
+                            resolve(instance);
+                        })
+                        .catch((error) => {
+                            console.error('Unity loading failed:', error);
+                            reject(error);
+                        });
+                };
+                
+                script.onerror = () => {
+                    reject(new Error('Failed to load Unity loader'));
+                };
+                
+                document.body.appendChild(script);
+            });
+        }
+        
+        // Пробуем разные версии при ошибке
+        async function tryAllVersions() {
+            let lastError = null;
+            
+            for (let i = 0; i < fileVersions.length; i++) {
+                const version = fileVersions[i];
+                
+                try {
+                    fallbackDetail.textContent = `Trying ${version.name}...`;
+                    fallbackMsg.style.display = 'block';
+                    fallbackMsg.style.background = 'rgba(52, 152, 219, 0.9)';
+                    
+                    const config = {
+                        ...version.config,
+                        streamingAssetsUrl: "StreamingAssets",
+                        companyName: "DefaultCompany",
+                        productName: "Clicker",
+                        productVersion: "1.0"
+                    };
+                    
+                    // Ждем немного между попытками
+                    if (i > 0) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                    
+                    const instance = await new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = `${buildPath}/webgl-build.loader.js`;
+                        
+                        script.onload = () => {
+                            createUnityInstance(canvas, config, (progress) => {
+                                const percent = Math.round(progress * 100);
+                                progressFill.style.width = percent + '%';
+                                progressText.textContent = percent + '%';
+                            })
+                            .then(resolve)
+                            .catch(reject);
+                        };
+                        
+                        script.onerror = () => reject(new Error('Loader failed'));
+                        document.body.appendChild(script);
+                    });
+                    
+                    // Успех!
+                    loadingEl.style.opacity = '0';
+                    loadingEl.style.pointerEvents = 'none';
+                    fallbackMsg.style.display = 'none';
+                    console.log(`Success with ${version.name}!`);
+                    return instance;
+                    
+                } catch (error) {
+                    console.warn(`${version.name} failed:`, error);
+                    lastError = error;
+                    continue;
+                }
+            }
+            
+            // Все попытки провалились
+            throw lastError || new Error('All loading attempts failed');
+        }
+        
+        // Основная функция инициализации
+        async function initGame() {
+            try {
+                await loadGame();
+            } catch (error) {
+                console.error('Initial load failed, trying all versions:', error);
+                
+                // Пробуем все версии по очереди
+                try {
+                    await tryAllVersions();
+                } catch (finalError) {
+                    // Все попытки провалились
+                    console.error('Game failed to load:', finalError);
+                    loadingEl.innerHTML = `
+                        <div style="color: #e74c3c; font-size: 20px; margin-bottom: 20px;">
+                            ❌ Failed to load game
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            Possible reasons:
+                        </div>
+                        <ul style="text-align: left; margin: 0 auto; display: inline-block;">
+                            <li>Game files are missing or corrupted</li>
+                            <li>Browser doesn't support WebGL</li>
+                            <li>GitHub Pages has file size limits</li>
+                        </ul>
+                        <div style="margin-top: 20px;">
+                            <button onclick="location.reload()" style="
+                                padding: 10px 20px;
+                                background: #3498db;
+                                border: none;
+                                border-radius: 5px;
+                                color: white;
+                                font-size: 16px;
+                                cursor: pointer;
+                            ">Try Again</button>
+                        </div>
+                    `;
+                    fallbackMsg.style.display = 'none';
+                }
+            }
+        }
+        
+        // Запускаем игру при загрузке страницы
+        window.addEventListener('DOMContentLoaded', initGame);
+        
+        // Добавляем обработчик ошибок
+        window.addEventListener('error', (event) => {
+            console.error('Global error:', event.error);
+        });
+        
+        // Для отладки в консоли
+        window.debugGame = {
+            reload: () => location.reload(),
+            showConfig: () => console.log(fileVersions),
+            forceVersion: (index) => {
+                if (fileVersions[index]) {
+                    const version = fileVersions[index];
+                    console.log('Forcing version:', version.name);
+                    // Перезагружаем с выбранной версией
+                }
+            }
+        };
+    </script>
+</body>
+</html>
